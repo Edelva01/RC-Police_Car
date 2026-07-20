@@ -6,6 +6,7 @@ from wifi_setup import (
     load_wifi_credentials,
     parse_form_body,
     save_wifi_credentials,
+    start_open_access_point,
     stop_access_point,
     url_decode,
 )
@@ -531,7 +532,7 @@ _WIFI_PAGE = """<!doctype html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta charset="utf-8" />
-    <title>Change Wi-Fi</title>
+    <title>__WIFI_TITLE__</title>
     <style>
         body { font-family: sans-serif; margin: 16px; background: #f4f7fb; color: #1f2a44; }
         .card { max-width: 520px; margin: 0 auto; padding: 16px; background: #fff;
@@ -550,8 +551,9 @@ _WIFI_PAGE = """<!doctype html>
 </head>
 <body>
     <div class="card">
-        <a class="back" href="/">&larr; Back to drive</a>
-        <h1>Change Wi-Fi</h1>
+        <a class="back" href="__BACK_HREF__">__BACK_TEXT__</a>
+        <h1>__WIFI_TITLE__</h1>
+        <p>__WIFI_INTRO__</p>
         <p>Current: Wi-Fi "__CURRENT_SSID__"</p>
         __WIFI_MESSAGE__
         <form method="POST" action="/wifi/save">
@@ -566,12 +568,27 @@ _WIFI_PAGE = """<!doctype html>
 </html>
 """
 
+# Paths phones/OS hit to detect a captive portal / "Sign in to network".
+_CAPTIVE_PROBE_PATHS = (
+    "/generate_204",
+    "/gen_204",
+    "/hotspot-detect.html",
+    "/library/test/success.html",
+    "/connecttest.txt",
+    "/ncsi.txt",
+    "/success.txt",
+    "/canonical.html",
+    "/redirect",
+    "/check_network_status.txt",
+)
+
 
 class WebController:
     def __init__(self, state):
         self.state = state
         self.network = None
         self.socket = None
+        self.dns_socket = None
         self.ip_address = None
         self.wifi_mode = "sta"
         self.current_ssid = ""
@@ -611,13 +628,15 @@ class WebController:
         server = socket.socket()
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind(("0.0.0.0", WEB_PORT))
-        server.listen(4)
+        server.listen(8)
         server.setblocking(False)
 
         self.socket = server
+        self._start_captive_dns(socket)
 
         if self.wifi_mode == "ap":
             print("Drive + setup ready at http://%s:%d (Pico Wi-Fi)" % (self.ip_address, WEB_PORT))
+            print("Captive portal: Wi-Fi setup opens automatically after join")
         else:
             print("Web control ready at http://%s:%d" % (self.ip_address, WEB_PORT))
         return True
@@ -629,6 +648,101 @@ class WebController:
             except OSError:
                 pass
             self.socket = None
+
+        if self.dns_socket is not None:
+            try:
+                self.dns_socket.close()
+            except OSError:
+                pass
+            self.dns_socket = None
+
+    def _start_captive_dns(self, socket_module):
+        """In AP mode, answer all DNS lookups with the Pico IP so phones open the portal."""
+
+        self.dns_socket = None
+        if self.wifi_mode != "ap" or not self.ip_address:
+            return
+
+        try:
+            dns = socket_module.socket(socket_module.AF_INET, socket_module.SOCK_DGRAM)
+            dns.setsockopt(socket_module.SOL_SOCKET, socket_module.SO_REUSEADDR, 1)
+            dns.bind(("0.0.0.0", 53))
+            dns.setblocking(False)
+            self.dns_socket = dns
+        except OSError as error:
+            print("Captive DNS unavailable:", error)
+            self.dns_socket = None
+
+    def _portal_url(self, path="/"):
+        return "http://%s%s" % (self.ip_address or "192.168.4.1", path)
+
+    def _poll_captive_dns(self):
+        if self.dns_socket is None:
+            return
+
+        for _ in range(8):
+            try:
+                data, addr = self.dns_socket.recvfrom(512)
+            except OSError:
+                break
+
+            reply = self._build_dns_reply(data)
+            if reply is None:
+                continue
+
+            try:
+                self.dns_socket.sendto(reply, addr)
+            except OSError:
+                pass
+
+    def _build_dns_reply(self, query):
+        """Minimal DNS A-record reply pointing every name at the Pico SoftAP IP."""
+
+        if query is None or len(query) < 12:
+            return None
+
+        # Reject responses / truncated nonsense; only answer standard queries.
+        flags = (query[2] << 8) | query[3]
+        if flags & 0x8000:
+            return None
+
+        question_count = (query[4] << 8) | query[5]
+        if question_count < 1:
+            return None
+
+        index = 12
+        while index < len(query):
+            label_len = query[index]
+            if label_len == 0:
+                index += 1
+                break
+            if (label_len & 0xC0) == 0xC0:
+                index += 2
+                break
+            index += 1 + label_len
+            if index >= len(query):
+                return None
+
+        if index + 4 > len(query):
+            return None
+
+        question_end = index + 4
+        question = query[12:question_end]
+
+        try:
+            parts = [int(part) for part in str(self.ip_address).split(".")]
+            if len(parts) != 4:
+                return None
+            ip_bytes = bytes(parts)
+        except (ValueError, TypeError):
+            return None
+
+        # Header: response + recursion available; 1 question, 1 answer.
+        header = bytearray(query[0:2])
+        header += b"\x81\x80\x00\x01\x00\x01\x00\x00\x00\x00"
+        # Answer: pointer to question name, A, IN, TTL 60s, 4-byte IPv4.
+        answer = b"\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x3c\x00\x04" + ip_bytes
+        return bytes(header) + question + answer
 
     def _escape_html(self, value):
         text = str(value or "")
@@ -682,9 +796,10 @@ class WebController:
     def _build_mode_banner(self):
         ssid = self._escape_html(self.current_ssid or self._read_current_ssid())
         css_class = "mode-banner pico" if self.wifi_mode == "ap" else "mode-banner"
+        wifi_href = "/wifi"
         return (
-            '<a class="%s" href="/wifi">Connected: Wi-Fi &quot;%s&quot;</a>'
-            % (css_class, ssid)
+            '<a class="%s" href="%s">Connected: Wi-Fi &quot;%s&quot;</a>'
+            % (css_class, wifi_href, ssid)
         )
 
     def _build_html_page(self):
@@ -702,8 +817,23 @@ class WebController:
             message_html = ""
 
         ssid = self._escape_html(self.current_ssid or self._read_current_ssid())
+        if self.wifi_mode == "ap":
+            title = "Connect to Wi-Fi"
+            intro = "Enter home or school Wi-Fi so the car can join that network. Or drive now on this Pico Wi-Fi."
+            back_href = "/drive"
+            back_text = "&rarr; Drive without saving Wi-Fi"
+        else:
+            title = "Change Wi-Fi"
+            intro = "Save new Wi-Fi credentials for the car."
+            back_href = "/"
+            back_text = "&larr; Back to drive"
+
         return (
             _WIFI_PAGE
+            .replace("__WIFI_TITLE__", title)
+            .replace("__WIFI_INTRO__", intro)
+            .replace("__BACK_HREF__", back_href)
+            .replace("__BACK_TEXT__", back_text)
             .replace("__CURRENT_SSID__", ssid)
             .replace("__WIFI_MESSAGE__", message_html)
         )
@@ -719,12 +849,19 @@ class WebController:
             if isinstance(payload, str):
                 payload = payload.encode("utf-8")
 
+            reason = {
+                200: "OK",
+                302: "Found",
+                400: "Bad Request",
+            }.get(status_code, "OK")
+
             header = (
-                "HTTP/1.1 %d OK\r\n"
+                "HTTP/1.1 %d %s\r\n"
                 "Content-Type: %s\r\n"
                 "Content-Length: %d\r\n"
-                "Connection: close\r\n\r\n"
-            ) % (status_code, content_type, len(payload))
+                "Connection: close\r\n"
+                "Cache-Control: no-store\r\n\r\n"
+            ) % (status_code, reason, content_type, len(payload))
 
             client.send(header)
 
@@ -736,6 +873,31 @@ class WebController:
                 total_sent += sent
         except OSError:
             pass
+
+    def _respond_redirect(self, client, location):
+        try:
+            header = (
+                "HTTP/1.1 302 Found\r\n"
+                "Location: %s\r\n"
+                "Content-Length: 0\r\n"
+                "Connection: close\r\n"
+                "Cache-Control: no-store\r\n\r\n"
+            ) % location
+            client.send(header.encode("utf-8"))
+        except OSError:
+            pass
+
+    def _is_captive_probe(self, path):
+        if path in _CAPTIVE_PROBE_PATHS:
+            return True
+        lower = path.lower()
+        return (
+            lower.endswith("/generate_204")
+            or lower.endswith("/gen_204")
+            or lower.endswith("/hotspot-detect.html")
+            or lower.endswith("/connecttest.txt")
+            or lower.endswith("/ncsi.txt")
+        )
 
     def _extract_path(self, path_or_line):
         """Return the URL path without query string from a path or request line."""
@@ -827,6 +989,11 @@ class WebController:
 
         joined, result = connect_station(ssid, password)
         if not joined:
+            # Failed STA join leaves SoftAP broken unless we restart AP-only mode.
+            if self.wifi_mode == "ap":
+                ap_ok, ap_ip = start_open_access_point()
+                if ap_ok:
+                    self.ip_address = ap_ip
             self._wifi_form_message = "Could not join that Wi-Fi. Check the name and password."
             self._wifi_form_is_error = True
             print("Join Wi-Fi failed:", result)
@@ -890,6 +1057,25 @@ class WebController:
                 self._respond(client, 200, "text/plain", self._build_status_text())
                 return None
 
+            # SoftAP captive portal: land on credentials, and redirect OS probes there.
+            if self.wifi_mode == "ap":
+                if path.startswith("/drive"):
+                    self._respond(client, 200, "text/html", self._build_html_page())
+                    return None
+
+                if path == "/" or self._is_captive_probe(path):
+                    if path == "/":
+                        self._wifi_form_message = ""
+                        self._wifi_form_is_error = False
+                        self._respond(client, 200, "text/html", self._build_wifi_page())
+                    else:
+                        self._respond_redirect(client, self._portal_url("/"))
+                    return None
+
+                # Any other browse while on Pico Wi-Fi opens the setup page.
+                self._respond_redirect(client, self._portal_url("/"))
+                return None
+
             self._respond(client, 200, "text/html", self._build_html_page())
             return None
 
@@ -908,8 +1094,10 @@ class WebController:
         if self.socket is None:
             return None
 
+        self._poll_captive_dns()
+
         command = None
-        for _ in range(4):
+        for _ in range(8):
             try:
                 client, _ = self.socket.accept()
             except OSError:

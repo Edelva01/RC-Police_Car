@@ -96,6 +96,29 @@ def parse_form_body(body_text):
     return fields
 
 
+def _deactivate_station():
+    """Turn off STA so SoftAP clients can reach 192.168.4.1 reliably."""
+
+    try:
+        import network
+    except ImportError:
+        return
+
+    sta = network.WLAN(network.STA_IF)
+    try:
+        if sta.isconnected():
+            sta.disconnect()
+            time.sleep_ms(200)
+    except OSError:
+        pass
+
+    try:
+        sta.active(False)
+    except OSError:
+        pass
+    time.sleep_ms(200)
+
+
 def connect_station(ssid, password, timeout_ms=None):
     """Try joining an access point. Returns (ok, ip_or_message)."""
 
@@ -124,11 +147,14 @@ def connect_station(ssid, password, timeout_ms=None):
     try:
         wlan.connect(ssid, password)
     except OSError as error:
+        _deactivate_station()
         return False, "Connect failed: %s" % error
 
     start_time = time.ticks_ms()
     while not wlan.isconnected():
         if time.ticks_diff(time.ticks_ms(), start_time) >= timeout_ms:
+            # Leave STA fully off so SoftAP fallback can serve http://192.168.4.1/
+            _deactivate_station()
             return False, "Wi-Fi connection timeout"
         time.sleep_ms(200)
 
@@ -159,11 +185,20 @@ def start_open_access_point():
     except ImportError:
         return False, "network module missing"
 
-    sta = network.WLAN(network.STA_IF)
-    sta.active(True)
+    # STA must be off in AP mode. Leaving it active after a failed home
+    # join often makes phones associate to the Pico but never reach .4.1.
+    _deactivate_station()
 
     ap = network.WLAN(network.AP_IF)
+    try:
+        if ap.active():
+            ap.active(False)
+            time.sleep_ms(200)
+    except OSError:
+        pass
+
     ap.active(True)
+    time.sleep_ms(200)
 
     try:
         ap.config(
@@ -177,7 +212,26 @@ def start_open_access_point():
         except OSError as error:
             return False, "Could not start Pico Wi-Fi: %s" % error
 
-    ip_address = ap.ifconfig()[0]
+    # Force the well-known SoftAP address phones expect.
+    try:
+        ap.ifconfig(("192.168.4.1", "255.255.255.0", "192.168.4.1", "192.168.4.1"))
+    except OSError:
+        pass
+
+    start_time = time.ticks_ms()
+    ip_address = "0.0.0.0"
+    while time.ticks_diff(time.ticks_ms(), start_time) < 3000:
+        try:
+            ip_address = ap.ifconfig()[0]
+        except OSError:
+            ip_address = "0.0.0.0"
+        if ip_address and ip_address != "0.0.0.0":
+            return True, ip_address
+        time.sleep_ms(100)
+
+    if not ip_address or ip_address == "0.0.0.0":
+        return False, "Pico Wi-Fi started but has no IP yet"
+
     return True, ip_address
 
 
