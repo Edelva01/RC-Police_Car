@@ -115,15 +115,15 @@ def show_wifi_connecting(ssid):
 
 
 def show_wifi_connected(ssid, ip_address):
-    ssid_text = "Wi-Fi: " + ("" if ssid is None else str(ssid))
+    _ = ssid  # Keep signature stable for existing callers.
     ip_text = "IP: " + ("" if ip_address is None else str(ip_address))
-    show_lines(ssid_text, ip_text)
+    show_lines(_BRAND, ip_text)
 
 
 def show_ap_mode(ap_name, ip_address):
-    ap_text = "AP: " + ("" if ap_name is None else str(ap_name))
+    _ = ap_name  # Keep signature stable for existing callers.
     ip_text = "IP: " + ("" if ip_address is None else str(ip_address))
-    show_lines(ap_text, ip_text)
+    show_lines(_BRAND, ip_text)
 
 
 def show_wifi_error(message):
