@@ -92,6 +92,21 @@ WIFI_SETUP_AP_CHANNEL = 6
 
 
 # =========================================================
+# LCD STATUS DISPLAY (I2C 1602)
+# =========================================================
+
+LCD_ENABLED = True
+LCD_I2C_ID = 0
+LCD_SDA_PIN = 16
+LCD_SCL_PIN = 17
+LCD_I2C_FREQUENCY = 100000
+
+# 0x27 is common for PCF8574 backpacks on 1602 LCDs.
+# Set to None to auto-detect (tries 0x27/0x3F via lcd1602.py scan logic).
+LCD_I2C_ADDRESS = 0x27
+
+
+# =========================================================
 # ULTRASONIC DISTANCE (HC-SR04)
 # =========================================================
 

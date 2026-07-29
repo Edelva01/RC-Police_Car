@@ -11,6 +11,12 @@ from config import (
     WIFI_SETUP_AP_SSID,
     WIFI_SSID,
 )
+from lcd_display import (
+    show_ap_mode,
+    show_wifi_connected,
+    show_wifi_connecting,
+    show_wifi_error,
+)
 
 
 def load_wifi_credentials():
@@ -144,10 +150,12 @@ def connect_station(ssid, password, timeout_ms=None):
         pass
 
     print("Connecting Wi-Fi to:", ssid)
+    show_wifi_connecting(ssid)
     try:
         wlan.connect(ssid, password)
     except OSError as error:
         _deactivate_station()
+        show_wifi_error("connect failed")
         return False, "Connect failed: %s" % error
 
     start_time = time.ticks_ms()
@@ -155,11 +163,13 @@ def connect_station(ssid, password, timeout_ms=None):
         if time.ticks_diff(time.ticks_ms(), start_time) >= timeout_ms:
             # Leave STA fully off so SoftAP fallback can serve http://192.168.4.1/
             _deactivate_station()
+            show_wifi_error("timeout")
             return False, "Wi-Fi connection timeout"
         time.sleep_ms(200)
 
     ip_address = wlan.ifconfig()[0]
     print("Wi-Fi connected:", ip_address)
+    show_wifi_connected(ssid, ip_address)
     return True, ip_address
 
 
@@ -226,12 +236,15 @@ def start_open_access_point():
         except OSError:
             ip_address = "0.0.0.0"
         if ip_address and ip_address != "0.0.0.0":
+            show_ap_mode(WIFI_SETUP_AP_SSID, ip_address)
             return True, ip_address
         time.sleep_ms(100)
 
     if not ip_address or ip_address == "0.0.0.0":
+        show_wifi_error("ap no ip")
         return False, "Pico Wi-Fi started but has no IP yet"
 
+    show_ap_mode(WIFI_SETUP_AP_SSID, ip_address)
     return True, ip_address
 
 
