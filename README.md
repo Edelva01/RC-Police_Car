@@ -29,6 +29,7 @@ py -m mpremote connect COM3 run main.py
 - **Stop** and **Engine OFF** both cancel Auto (so cruise cannot restart the motor)
 - Boot Wi‑Fi setup portal when no home/school network is available
 - USB serial commands (same language as the web UI)
+- 1602 I2C LCD status display with Turtleback branding, live Wi‑Fi/IP, and scrolling text
 
 ## Requirements
 
@@ -51,6 +52,9 @@ py -m mpremote connect COM3 run main.py
 | `input_serial.py` | Non-blocking USB serial input |
 | `web_control.py` | Embedded HTTP UI, `/command`, `/status`, `/wifi` |
 | `wifi_setup.py` | Join known Wi‑Fi, or open setup portal for credentials |
+| `lcd_display.py` | LCD status helper (branding, Wi‑Fi/IP screens, scrolling) |
+| `lcd1602.py` | I2C LCD driver used by `lcd_display.py` |
+| `boot.py` | Boot LED sequence + startup LCD messaging |
 | `distance.py` | HC-SR04 ultrasonic distance sensing |
 | `self_driving.py` | Auto cruise, random turns, obstacle escape |
 | `ignition.py` | Engine on / off / toggle + safe resets |
@@ -86,6 +90,8 @@ Do **not** put vehicle logic in the HTML/JS. The page only sends commands and di
 | Brake light | GP7 | Digital |
 | Police left | GP1 | Digital |
 | Police right | GP2 | Digital |
+| LCD SDA | **GP16** | I2C0 SDA (`lcd_display.py`) |
+| LCD SCL | **GP17** | I2C0 SCL (`lcd_display.py`) |
 | Ultrasonic TRIG | **GP15** | HC-SR04 |
 | Ultrasonic ECHO | **GP14** | HC-SR04 — **level-shift 5 V → 3.3 V** |
 
@@ -232,6 +238,27 @@ The browser queues requests (one in flight) so status polls and commands do not 
 
 Credentials are stored **on the Pico only** in `wifi_secrets.json` (gitignored). Optional empty factory defaults: `WIFI_SSID` / `WIFI_PASSWORD` in `config.py` — do not commit real passwords.
 
+## LCD status display
+
+The project includes a 16x2 I2C LCD status display driven by `lcd_display.py`.
+
+- Brand text uses **Turtleback Robotics Academy**
+- Wi‑Fi text is live (current SSID being joined, AP name, and runtime IP)
+- Long lines scroll automatically across the 16-character display
+
+Typical flow:
+
+1. Boot: brand + startup text
+2. Wi‑Fi connect attempt: `Wi‑Fi: <ssid>`
+3. On success: `Wi‑Fi: <ssid>` and `IP: <ip>`
+4. On fallback AP: `AP: Turtleback-Car-Setup` and `IP: 192.168.4.1`
+
+LCD wiring used by this repo:
+
+- SDA → GP16
+- SCL → GP17
+- Backpack address default: `0x27` (configurable)
+
 ### Deploy tips
 
 ```powershell
@@ -265,6 +292,12 @@ If mpremote says the port is in use, stop other `mpremote` / Python sessions hol
 | `MAIN_LOOP_DELAY_MS` | Main loop pace (default 5 ms) |
 | `WEB_PORT` | HTTP port (default 80) |
 | `WIFI_SETUP_AP_SSID` | Open setup network name |
+| `LCD_ENABLED` | Enable / disable LCD output |
+| `LCD_SDA_PIN` / `LCD_SCL_PIN` | LCD I2C wiring pins |
+| `LCD_I2C_ADDRESS` | LCD I2C address (default `0x27`) |
+| `LCD_SCROLL_STEP_MS` | Scroll speed (lower = faster) |
+| `LCD_SCROLL_PAUSE_MS` | Pause after each full scroll pass |
+| `LCD_SCROLL_CYCLES` | Number of full passes for each message |
 
 ## Troubleshooting
 
