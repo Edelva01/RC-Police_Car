@@ -100,10 +100,17 @@ LCD_I2C_ID = 0
 LCD_SDA_PIN = 16
 LCD_SCL_PIN = 17
 LCD_I2C_FREQUENCY = 100000
+LCD_WIDTH = 16
 
 # 0x27 is common for PCF8574 backpacks on 1602 LCDs.
 # Set to None to auto-detect (tries 0x27/0x3F via lcd1602.py scan logic).
 LCD_I2C_ADDRESS = 0x27
+
+# Scroll long LCD lines (marquee effect).
+LCD_SCROLL_ENABLED = True
+LCD_SCROLL_STEP_MS = 220
+LCD_SCROLL_PAUSE_MS = 700
+LCD_SCROLL_CYCLES = 1
 
 
 # =========================================================
