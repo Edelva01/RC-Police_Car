@@ -17,21 +17,25 @@ from config import (
 )
 
 _lcd = None
-_init_attempted = False
 _BRAND = "Turtleback Robotics Academy"
+_BRAND_LINE = "Turtleback Robo"
+
+
+def _pad_right_16(text):
+    value = "" if text is None else str(text)
+    if len(value) >= LCD_WIDTH:
+        return value[:LCD_WIDTH]
+    return value + (" " * (LCD_WIDTH - len(value)))
 
 
 def _fit_16(text):
-    if text is None:
-        return ""
-    value = str(text)
-    return value[:LCD_WIDTH]
+    return _pad_right_16(text)
 
 
 def _line_frames(text):
     raw = "" if text is None else str(text)
     if len(raw) <= LCD_WIDTH:
-        return [raw.ljust(LCD_WIDTH)]
+        return [_pad_right_16(raw)]
 
     # Add spacing so wrapped text is readable before the next cycle.
     padded = raw + "   "
@@ -42,15 +46,13 @@ def _line_frames(text):
 
 
 def _init_lcd():
-    global _lcd, _init_attempted
+    global _lcd
 
     if _lcd is not None:
         return _lcd
 
-    if _init_attempted or not LCD_ENABLED:
+    if not LCD_ENABLED:
         return None
-
-    _init_attempted = True
 
     try:
         from machine import I2C, Pin
@@ -76,14 +78,16 @@ def show_lines(line1, line2=""):
         return False
 
     try:
-        lcd.clear()
         text1 = "" if line1 is None else str(line1)
         text2 = "" if line2 is None else str(line2)
 
         if not LCD_SCROLL_ENABLED:
+            # Static mode avoids constant clear/scroll work and keeps text visible.
             lcd.write(0, 0, _fit_16(text1))
             lcd.write(0, 1, _fit_16(text2))
             return True
+
+        lcd.clear()
 
         frames1 = _line_frames(text1)
         frames2 = _line_frames(text2)
@@ -106,32 +110,34 @@ def show_lines(line1, line2=""):
 
 
 def show_boot_message():
-    show_lines(_BRAND, "Starting...")
+    show_lines(_BRAND_LINE, "Starting...")
 
 
 def show_wifi_connecting(ssid):
-    ssid_text = "Wi-Fi: " + ("" if ssid is None else str(ssid))
-    show_lines(_BRAND, ssid_text)
+    ssid_text = ("SSID:" + ("" if ssid is None else str(ssid))).strip()
+    show_lines(_BRAND_LINE, ssid_text)
 
 
 def show_wifi_connected(ssid, ip_address):
     _ = ssid  # Keep signature stable for existing callers.
-    ip_text = "IP: " + ("" if ip_address is None else str(ip_address))
-    show_lines(_BRAND, ip_text)
+    ip_text = "STA:" + ("" if ip_address is None else str(ip_address))
+    show_lines(_BRAND_LINE, ip_text)
 
 
 def show_ap_mode(ap_name, ip_address):
     _ = ap_name  # Keep signature stable for existing callers.
-    ip_text = "IP: " + ("" if ip_address is None else str(ip_address))
-    show_lines(_BRAND, ip_text)
+    ip_text = "AP:" + ("" if ip_address is None else str(ip_address))
+    show_lines(_BRAND_LINE, ip_text)
 
 
-def show_wifi_error(message):
-    show_lines(_BRAND, "Wi-Fi issue: " + ("" if message is None else str(message)))
+def show_wifi_error(message, detail=None):
+    message_text = "ERR:" + ("" if message is None else str(message))
+    detail_text = "Check Wi-Fi" if detail is None else str(detail)
+    show_lines(message_text, detail_text)
 
 
 def pulse_boot_complete():
     """Briefly show boot-complete text after startup LED sequence."""
 
-    if show_lines(_BRAND, "Waiting Wi-Fi"):
+    if show_lines(_BRAND_LINE, "Waiting Wi-Fi"):
         time.sleep_ms(700)

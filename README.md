@@ -29,7 +29,7 @@ py -m mpremote connect COM3 run main.py
 - **Stop** and **Engine OFF** both cancel Auto (so cruise cannot restart the motor)
 - Boot Wi‑Fi setup portal when no home/school network is available
 - USB serial commands (same language as the web UI)
-- 1602 I2C LCD status display with Turtleback branding, live Wi‑Fi/IP, and scrolling text
+- 1602 I2C LCD status display with Turtleback branding and live Wi‑Fi/IP
 
 ## Requirements
 
@@ -52,7 +52,7 @@ py -m mpremote connect COM3 run main.py
 | `input_serial.py` | Non-blocking USB serial input |
 | `web_control.py` | Embedded HTTP UI, `/command`, `/status`, `/wifi` |
 | `wifi_setup.py` | Join known Wi‑Fi, or open setup portal for credentials |
-| `lcd_display.py` | LCD status helper (branding, Wi‑Fi/IP screens, scrolling) |
+| `lcd_display.py` | LCD status helper (branding, Wi‑Fi/IP screens, troubleshooting text) |
 | `lcd1602.py` | I2C LCD driver used by `lcd_display.py` |
 | `boot.py` | Boot LED sequence + startup LCD messaging |
 | `distance.py` | HC-SR04 ultrasonic distance sensing |
@@ -242,16 +242,17 @@ Credentials are stored **on the Pico only** in `wifi_secrets.json` (gitignored).
 
 The project includes a 16x2 I2C LCD status display driven by `lcd_display.py`.
 
-- Brand text uses **Turtleback Robotics Academy**
-- Wi‑Fi text is live (current SSID being joined, AP name, and runtime IP)
-- Long lines scroll automatically across the 16-character display
+- Static (no-scroll) display to reduce CPU usage and avoid blanking
+- Brand text uses **Turtleback Robotics Academy** (shown as `Turtleback Robo` on 16-char line)
+- Live network state text (join attempt, STA IP, AP IP, and short error hints)
 
 Typical flow:
 
 1. Boot: brand + startup text
-2. Wi‑Fi connect attempt: `Wi‑Fi: <ssid>`
-3. On success: `Wi‑Fi: <ssid>` and `IP: <ip>`
-4. On fallback AP: `AP: Turtleback-Car-Setup` and `IP: 192.168.4.1`
+2. Wi‑Fi connect attempt: `SSID:<ssid>`
+3. On success: `STA:<ip>`
+4. On fallback AP: `AP:<ip>` (usually `AP:192.168.4.1`)
+5. On failures: short diagnostics such as `ERR:timeout` / `Starting AP...`
 
 LCD wiring used by this repo:
 
@@ -295,7 +296,8 @@ If mpremote says the port is in use, stop other `mpremote` / Python sessions hol
 | `LCD_ENABLED` | Enable / disable LCD output |
 | `LCD_SDA_PIN` / `LCD_SCL_PIN` | LCD I2C wiring pins |
 | `LCD_I2C_ADDRESS` | LCD I2C address (default `0x27`) |
-| `LCD_SCROLL_STEP_MS` | Scroll speed (lower = faster) |
+| `LCD_SCROLL_ENABLED` | Scroll mode (default `False` for static display) |
+| `LCD_SCROLL_STEP_MS` | Scroll speed when enabled (lower = faster) |
 | `LCD_SCROLL_PAUSE_MS` | Pause after each full scroll pass |
 | `LCD_SCROLL_CYCLES` | Number of full passes for each message |
 

@@ -155,7 +155,7 @@ def connect_station(ssid, password, timeout_ms=None):
         wlan.connect(ssid, password)
     except OSError as error:
         _deactivate_station()
-        show_wifi_error("connect failed")
+        show_wifi_error("connect", "STA connect fail")
         return False, "Connect failed: %s" % error
 
     start_time = time.ticks_ms()
@@ -163,7 +163,7 @@ def connect_station(ssid, password, timeout_ms=None):
         if time.ticks_diff(time.ticks_ms(), start_time) >= timeout_ms:
             # Leave STA fully off so SoftAP fallback can serve http://192.168.4.1/
             _deactivate_station()
-            show_wifi_error("timeout")
+            show_wifi_error("timeout", "Starting AP...")
             return False, "Wi-Fi connection timeout"
         time.sleep_ms(200)
 
@@ -241,7 +241,7 @@ def start_open_access_point():
         time.sleep_ms(100)
 
     if not ip_address or ip_address == "0.0.0.0":
-        show_wifi_error("ap no ip")
+        show_wifi_error("ap-no-ip", "Reboot then retry")
         return False, "Pico Wi-Fi started but has no IP yet"
 
     show_ap_mode(WIFI_SETUP_AP_SSID, ip_address)
